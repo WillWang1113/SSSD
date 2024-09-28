@@ -1,12 +1,14 @@
 import os
 import argparse
 import json
+from lightning_fabric import seed_everything
 import numpy as np
 import torch
 import torch.nn as nn
 
 from utils.util import find_max_epoch, print_size, training_loss, calc_diffusion_hyperparams
 from utils.util import get_mask_mnr, get_mask_bm, get_mask_rm
+from utils.data_factory import data_provider
 
 from imputers.DiffWaveImputer import DiffWaveImputer
 from imputers.SSSDSAImputer import SSSDSAImputer
@@ -43,11 +45,13 @@ def train(output_directory,
     masking(str):                   'mnr': missing not at random, 'bm': blackout missing, 'rm': random missing
     missing_k (int):                k missing time steps for each feature across the sample length.
     """
+    seed_everything(args.seed)
 
     # generate experiment (local) path
-    local_path = "T{}_beta0{}_betaT{}".format(diffusion_config["T"],
-                                              diffusion_config["beta_0"],
-                                              diffusion_config["beta_T"])
+    local_path = "{}_{}_{}".format(args.data_path.split('/')[-1][:-4], args.pred_len, args.seed)
+    # local_path = "T{}_beta0{}_betaT{}".format(diffusion_config["T"],
+    #                                           diffusion_config["beta_0"],
+    #                                           diffusion_config["beta_T"])
 
     # Get shared output_directory ready
     output_directory = os.path.join(output_directory, local_path)
@@ -104,10 +108,15 @@ def train(output_directory,
         
         
 
-    training_data = np.load(trainset_config['train_data_path'])
-    training_data = np.split(training_data, 160, 0)
-    training_data = np.array(training_data)
-    training_data = torch.from_numpy(training_data).float().cuda()
+    # training_data = np.load(trainset_config['train_data_path'])[..., [0]]
+    # training_data = np.reshape(training_data, (-1, 100, 1))
+    # training_data = training_data[:len(training_data)//128 * 128]
+    # training_data = np.split(training_data, 128, 0)
+    # # training_data = np.split(training_data, 160, 0)
+    # training_data = np.array(training_data)
+    # training_data = torch.from_numpy(training_data).float()
+    # training_data = training_data.permute(1,0,2,3)
+    _, training_data = data_provider(args, flag='train')
     print('Data loaded')
 
     
@@ -116,13 +125,16 @@ def train(output_directory,
     n_iter = ckpt_iter + 1
     while n_iter < n_iters + 1:
         for batch in training_data:
+            batch = batch.cuda()
 
             if masking == 'rm':
                 transposed_mask = get_mask_rm(batch[0], missing_k)
             elif masking == 'mnr':
                 transposed_mask = get_mask_mnr(batch[0], missing_k)
             elif masking == 'bm':
-                transposed_mask = get_mask_bm(batch[0], missing_k)
+                transposed_mask = get_mask_bm(batch[0], args.pred_len)
+                # transposed_mask = get_mask_bm(batch[0], missing_k)
+            
 
             mask = transposed_mask.permute(1, 0)
             mask = mask.repeat(batch.size()[0], 1, 1).float().cuda()
@@ -156,8 +168,19 @@ def train(output_directory,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', type=str, default='config/SSSDS4.json',
+    parser.add_argument('-c', '--config', type=str, default='config/config_SSSDS4.json',
                         help='JSON file for configuration')
+    parser.add_argument('--data', type=str, default='custom')
+    parser.add_argument('--root_path', type=str, default='/home/user/data/THU-timeseries')
+    parser.add_argument('--data_path', type=str, default='electricity/electricity.csv')
+    parser.add_argument('--seq_len', type=int)
+    parser.add_argument('--label_len', type=int, default=0)
+    parser.add_argument('--pred_len', type=int)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--features', type=str, default='S')
+    parser.add_argument('--target', type=str, default='OT')
+    parser.add_argument('--seed', type=int, default=0)
+    
 
     args = parser.parse_args()
 
@@ -186,5 +209,6 @@ if __name__ == "__main__":
         model_config = config['sashimi_config']
     elif train_config['use_model'] == 2:
         model_config = config['wavenet_config']
+        model_config['s4_lmax'] = args.seq_len + args.pred_len
 
     train(**train_config)

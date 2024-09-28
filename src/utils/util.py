@@ -235,10 +235,10 @@ def get_mask_bm(sample, k):
     as per ts imputers"""
 
     mask = torch.ones(sample.shape)
-    length_index = torch.tensor(range(mask.shape[0]))
-    list_of_segments_index = torch.split(length_index, k)
-    s_nan = random.choice(list_of_segments_index)
-    for channel in range(mask.shape[1]):
-        mask[:, channel][s_nan[0]:s_nan[-1] + 1] = 0
-
+    # length_index = torch.tensor(range(mask.shape[0]))
+    # list_of_segments_index = torch.split(length_index, k)
+    # s_nan = random.choice(list_of_segments_index)
+    # for channel in range(mask.shape[1]):
+        # mask[:, channel][s_nan[0]:s_nan[-1] + 1] = 0
+    mask[-k:, :] = 0
     return mask
